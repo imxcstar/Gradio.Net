@@ -33,7 +33,7 @@ public class File : Component, IHaveClearEvent, IHaveChangeEvent, IHaveSelectEve
         }
 
         FileData fileData = JsonUtils.Deserialize<FileData>(str);
-        return fileData.Path;
+        return Context.DownloadableFiles[fileData.Path];
     }
 
     internal override object PostProcess(string rootUrl, object data)
@@ -57,14 +57,15 @@ public class File : Component, IHaveClearEvent, IHaveChangeEvent, IHaveSelectEve
 
     private static FileData ConvertToFileData(string rootUrl, string? str)
     {
-        Context.DownloadableFiles.TryAdd(str, str);
+        string fileId = str.ToMD5_16();
+        Context.DownloadableFiles.TryAdd(fileId, str);
         if (ClientUtils.IsUrl(str))
         {
             return new FileData { Path = null, Url = str };
         }
 
         FileInfo fileInfo = new FileInfo(str);
-        return new FileData { Path = str, Url = $"{rootUrl}/file={str}", Size = fileInfo.Length, OrigName = fileInfo.Name };
+        return new FileData { Path = fileId, Url = $"{rootUrl}/file={fileId}", Size = fileInfo.Length, OrigName = fileInfo.Name };
     }
 
     public static string Payload(object obj)

@@ -339,9 +339,9 @@ public class GradioApp
                 await file.Stream.CopyToAsync(stream);
             }
 
-            Context.DownloadableFiles.TryAdd(dest, dest);
-
-            outputFiles.Add(dest);
+            string fileId = dest.ToMD5_16();
+            Context.DownloadableFiles.TryAdd(fileId, dest);
+            outputFiles.Add(fileId);
 
             if (autoCloseFileStream)
                 file.Stream.Close();
@@ -350,20 +350,21 @@ public class GradioApp
         return outputFiles;
     }
 
-    public async Task<(string filePath, string contentType)> GetUploadedFile(string pathOrUrl)
+    public async Task<(string filePath, string contentType)> GetUploadedFile(string filePathMD5)
     {
+        if (!Context.DownloadableFiles.TryGetValue(filePathMD5, out string? pathOrUrl) || string.IsNullOrWhiteSpace(pathOrUrl))
+            throw new ArgumentException($"File not allowed: {filePathMD5}.");
+
         string filePath = new FileInfo(System.Net.WebUtility.UrlDecode(pathOrUrl)).FullName;
-        if (!Context.DownloadableFiles.TryGetValue(filePath, out _))
-        {
-            throw new ArgumentException($"File not allowed: {pathOrUrl}.");
-        }
 
         //Context.DownloadableFiles.Remove(filePath, out _);
 
-
-
-
         return (filePath, ClientUtils.GetMimeType(filePath));
+    }
+
+    public string GetMimeType(string filePath)
+    {
+        return ClientUtils.GetMimeType(filePath);
     }
 
     public virtual IFileInfo GetFileInfo(string subpath)

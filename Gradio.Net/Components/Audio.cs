@@ -31,7 +31,7 @@ public class Audio : Component, IStreamingInput, IHaveChangeEvent, IHaveClearEve
         string? str = data.ToString();
 
         FileData fileData = JsonUtils.Deserialize<FileData>(str);
-        return fileData.Path;
+        return Context.DownloadableFiles[fileData.Path];
     }
 
     internal override object PostProcess(string rootUrl, object data)
@@ -42,13 +42,14 @@ public class Audio : Component, IStreamingInput, IHaveChangeEvent, IHaveClearEve
         }
         string? str = data.ToString();
 
-        Context.DownloadableFiles.TryAdd(str, str);
+        string fileId = str.ToMD5_16();
+        Context.DownloadableFiles.TryAdd(fileId, str);
         if (ClientUtils.IsUrl(str))
         {
             return new FileData { Path = null, Url = str };
         }
 
-        return new FileData { Path = str, Url = $"{rootUrl}/file={str}" };
+        return new FileData { Path = fileId, Url = $"{rootUrl}/file={fileId}" };
     }
 
     public static string Payload(object obj)

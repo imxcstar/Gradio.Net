@@ -1,0 +1,185 @@
+﻿@using Gradio.Net.jinja2
+@using Microsoft.JSInterop
+@inject NavigationManager _navigation
+@inject GradioApp _gradioApp
+@inject IJSRuntime _js
+
+<script type="module">
+    (function () {
+        'use strict';
+
+        (function () {
+            if (!window.onSSEEventStream) {
+                const eventRegisters = {};
+
+                const onSSEEventStream = (data) => {
+                    let { uuid, final, content } = data;
+                    if (!eventRegisters[uuid]) {
+                        eventRegisters[uuid] = {
+                            instance: null,
+                            pending: [],
+                        };
+                    }
+                    if (final) {
+                        content = null;
+                    } else {
+                        if (typeof content === 'string') {
+                            content = new TextEncoder().encode(content);
+                        }
+                    }
+                    eventRegisters[uuid].pending.push({ final, content });
+                    if (eventRegisters[uuid].instance) {
+                        eventRegisters[uuid].instance.notifyMessage();
+                    }
+                };
+
+                Object.defineProperty(window, 'onSSEEventStream', {
+                    value: onSSEEventStream,
+                    configurable: true,
+                    writable: true,
+                    enumerable: false,
+                });
+
+                class CustomEventSource {
+                    constructor(url) {
+                        this.url = url;
+                        this.listeners = {};
+                        this.eventQueue = [];
+                        this.init();
+                    }
+
+                    async init() {
+                        let data = await fetch(this.url);
+                        let headers = data.headers;
+                        let uuid = headers.get('kapp-event-stream');
+                        this.processEventQueue(uuid);
+                    }
+
+                    addEventListener(type, listener) {
+                        console.log("addEventListener", type);
+                        if (!this.listeners[type]) {
+                            this.listeners[type] = [];
+                        }
+                        this.listeners[type].push(listener);
+                    }
+
+                    dispatchEvent(event) {
+                        if (this.listeners[event.type]) {
+                            this.listeners[event.type].forEach(listener => listener(event));
+                        }
+                    }
+
+                    processEventQueue(uuid) {
+                        const eventObj = eventRegisters[uuid];
+                        if (eventObj != null && eventObj.pending != null && eventObj.pending.length > 0) {
+                            const { final, content } = eventObj.pending.shift();
+                            const dcontent = content ? new TextDecoder().decode(content).substring(6) : null;
+                            console.log("dcontent", uuid, dcontent);
+                            const event = new MessageEvent('message', {
+                                data: dcontent
+                            });
+                            if (this._onmessage && dcontent != null)
+                                this._onmessage(event);
+                            this.dispatchEvent(event);
+
+                            if (final) {
+                                delete eventRegisters[uuid];
+                                return;
+                            }
+                        }
+                        setTimeout(() => this.processEventQueue(uuid), 30);
+                    }
+
+                    set onmessage(callback) {
+                        this._onmessage = callback;
+                    }
+
+                    close() {
+                    }
+                }
+
+                window.EventSource = CustomEventSource;
+            }
+
+            const originalFetch = window.fetch;
+
+            // 重写fetch函数
+            window.fetch = async (input, init) => {
+                // 获取请求的URL
+                const url = typeof input === 'string' ? input : input.url;
+
+                // 检查URL是否调用了/upload接口
+                if (url.includes('/upload') && init && init.body instanceof FormData) {
+                    // 从URL中获取upload_id参数
+                    const urlParams = new URLSearchParams(url.split('?')[1]);
+                    const uploadId = urlParams.get('upload_id');
+
+                    // 获取上传的文件
+                    const formData = init.body;
+                    let file = null;
+
+                    // 遍历FormData找到第一个文件对象
+                    for (let entry of formData.entries()) {
+                        if (entry[1] instanceof File) {
+                            file = entry[1];
+                            break;
+                        }
+                    }
+
+                    if (file) {
+                        // 将文件转换为Uint8Array
+                        const arrayBuffer = await file.arrayBuffer();
+                        const uint8Array = new Uint8Array(arrayBuffer);
+                        const ret = await window.GradioDotNetReference.invokeMethodAsync(window.GradioUploadFile, uploadId, file.name, uint8Array);
+                        console.log("GradioDotNetReference", ret);
+                        // 调用自定义的上传函数
+                        return new Promise((resolve, reject) => {
+                            resolve(new Response(ret, {
+                                status: 200,
+                                headers: { 'Content-Type': 'application/json' }
+                            }));
+                        });
+                    } else {
+                        console.error('No file found in FormData');
+                        return Promise.reject(new Error('No file found in FormData'));
+                    }
+                } else {
+                    // 对于其他接口，照常处理
+                    return originalFetch(input, init);
+                }
+            };
+        })();
+    })();
+</script>
+
+@html
+
+@code {
+    public MarkupString html;
+
+    protected override void OnInitialized()
+    {
+        Uri uri = new(_navigation.Uri);
+        var indexInfo = _gradioApp.GetFileInfo("index.html");
+        using Stream fileStream = indexInfo.CreateReadStream();
+        Template template = new(new StreamReader(fileStream).ReadToEnd());
+        html = new MarkupString(template.Render(new Dictionary<string, object>() { { "config", _gradioApp.GetConfig($"{uri.Scheme}://{uri.Host}") } }));
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await _js.InvokeVoidAsync("RegisterGradioDotNetReference", DotNetObjectReference.Create(this));
+            await _js.InvokeVoidAsync("RegisterGradioUploadFileData", nameof(UploadFileData));
+        }
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    [JSInvokable]
+    public async Task<string> UploadFileData(string uploadId, string fileName, byte[] fileContent)
+    {
+        var ret = await _gradioApp.Upload(uploadId, [(new MemoryStream(fileContent), fileName)]);
+        return System.Text.Json.JsonSerializer.Serialize(ret);
+    }
+}

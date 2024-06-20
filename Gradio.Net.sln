@@ -23,6 +23,12 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "readme_files", "readme_file
 		readme_files\README_zh-cn.md = readme_files\README_zh-cn.md
 	EndProjectSection
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Gradio.Net.Blazor.Hybrid.Maui", "Gradio.Net.Blazor.Hybrid.Maui\Gradio.Net.Blazor.Hybrid.Maui.csproj", "{586813FD-C88C-4A08-8890-B8EE28D8DE60}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Demo", "Demo", "{140E62D3-7C59-457C-9CCE-F2F4DF3B17C2}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Demo.Blazor.Hybrid.Maui", "Demo.Blazor.Hybrid.Maui\Demo.Blazor.Hybrid.Maui.csproj", "{D911325E-836F-4055-A074-4301066D2259}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -45,9 +51,24 @@ Global
 		{059D3B12-6259-4E0A-B61D-4DFA59074296}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{059D3B12-6259-4E0A-B61D-4DFA59074296}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{059D3B12-6259-4E0A-B61D-4DFA59074296}.Release|Any CPU.Build.0 = Release|Any CPU
+		{586813FD-C88C-4A08-8890-B8EE28D8DE60}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{586813FD-C88C-4A08-8890-B8EE28D8DE60}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{586813FD-C88C-4A08-8890-B8EE28D8DE60}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{586813FD-C88C-4A08-8890-B8EE28D8DE60}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D911325E-836F-4055-A074-4301066D2259}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D911325E-836F-4055-A074-4301066D2259}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D911325E-836F-4055-A074-4301066D2259}.Debug|Any CPU.Deploy.0 = Debug|Any CPU
+		{D911325E-836F-4055-A074-4301066D2259}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D911325E-836F-4055-A074-4301066D2259}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D911325E-836F-4055-A074-4301066D2259}.Release|Any CPU.Deploy.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{AB717BDB-6555-44AA-A367-0EC05A13E8F0} = {140E62D3-7C59-457C-9CCE-F2F4DF3B17C2}
+		{059D3B12-6259-4E0A-B61D-4DFA59074296} = {140E62D3-7C59-457C-9CCE-F2F4DF3B17C2}
+		{D911325E-836F-4055-A074-4301066D2259} = {140E62D3-7C59-457C-9CCE-F2F4DF3B17C2}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {A68FA315-516B-4431-9B4B-E2C75C3D527E}
