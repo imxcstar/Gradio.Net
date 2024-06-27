@@ -68,7 +68,7 @@ public static class GradioServiceExtensions
 
         webApplication.MapGet("/config", (HttpRequest request, [FromServices] GradioApp app) =>
         {
-            return app.GetConfig(request.GetRootUrl());
+            return app.GetConfig(request.GetRootUrl(), false);
         });
 
         webApplication.MapGet("/info", (HttpRequest request, [FromServices] GradioApp app) =>
@@ -83,7 +83,7 @@ public static class GradioServiceExtensions
 
         webApplication.MapGet("/queue/data", async ([FromServices] GradioApp app, HttpContext context, CancellationToken stoppingToken) =>
         {
-            context.Response.Headers.Add("Content-Type", "text/event-stream");
+            context.Response.Headers.Append("Content-Type", "text/event-stream");
 
 
             StreamWriter streamWriter = new(context.Response.Body);
@@ -95,7 +95,7 @@ public static class GradioServiceExtensions
             }
             await streamWriter.WriteLineAsync(new CloseStreamMessage().ProcessMsg());
             await streamWriter.FlushAsync();
-            app.ClonseSession(sessionHash);
+            app.CloseSession(sessionHash);
         });
 
         webApplication.MapPost("/upload", async (HttpRequest request, [FromServices] GradioApp app) =>
@@ -107,7 +107,7 @@ public static class GradioServiceExtensions
 
         webApplication.MapGet("/upload_progress", async ([FromServices] GradioApp app, HttpContext context, CancellationToken stoppingToken) =>
         {
-            context.Response.Headers.Add("Content-Type", "text/event-stream");
+            context.Response.Headers.Append("Content-Type", "text/event-stream");
 
             StreamWriter streamWriter = new(context.Response.Body);
 

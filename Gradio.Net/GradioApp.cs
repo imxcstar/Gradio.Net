@@ -21,7 +21,11 @@ public class GradioApp
 
     public Dictionary<string, object> GetConfig(string rootUrl)
     {
-        Dictionary<string, object> result = Context.RootBlock.GetConfig();
+        return GetConfig(rootUrl, true);
+    }
+    public Dictionary<string, object> GetConfig(string rootUrl, bool init)
+    {
+        Dictionary<string, object> result = Context.RootBlock.GetConfig(init);
 
         result["stylesheets"] = this._gradioServiceConfig.Stylesheets;
         result["body_css"] = this._gradioServiceConfig.BodyCss;
@@ -116,8 +120,14 @@ public class GradioApp
                 yield break;
             }
 
-            foreach (var pendingEventId in pendingEventIds)
+            foreach (string pendingEventId in pendingEventIds)
             {
+                while (Context.LogMessageChannel.Reader.TryRead(out LogMessage logMessage))
+                {
+                    logMessage.EventId = pendingEventId;
+                    yield return logMessage;
+                }
+
                 if (!Context.EventResults.TryGetValue(pendingEventId, out EventResult eventResult))
                 {
                     if (heartbeatCount++ > heartbeatRate)
@@ -155,6 +165,7 @@ public class GradioApp
                                 yield return new HeartbeatMessage();
                             }
                             await Task.Delay(checkRate);
+                            continue;
                         }
                     }
 
@@ -190,29 +201,52 @@ public class GradioApp
                     }
 
                     object[] data = result.Data;
+                    Exception outputEx = null;
+                    try
+                    {
+                        data = gr.Output(eventResult, data);
+                    }
+                    catch (Exception ex)
+                    {
+                        outputEx = ex;
+                    }
 
-                    yield return new ProcessCompletedMessage(eventResult.Event.Id, new Dictionary<string, object> {
-                        { "data",gr.Output(eventResult,data)}
-                    });
+                    while (Context.LogMessageChannel.Reader.TryRead(out LogMessage logMessage))
+                    {
+                        logMessage.EventId = pendingEventId;
+                        yield return logMessage;
+                    }
+
+                    if (outputEx != null)
+                    {
+                        yield return new UnexpectedErrorMessage(pendingEventId, outputEx.Message);
+                    }
+                    else
+                    {
+                        yield return new ProcessCompletedMessage(eventResult.Event.Id, new Dictionary<string, object> {
+                            { "data",data}
+                        });
+                    }
+
                     RemovePendingEvent(sessionHash, pendingEventId);
                     continue;
                 }
                 else if (eventResult.StreamingOutputTask != null)
                 {
-                    
-                   
-                  
-                    
-                     object[] result =  null;
-                    Output oldOutput =null;
-                    if (eventResult.AsyncEnumeratorOutput==null)
+
+
+
+
+                    object[] result = null;
+                    Output oldOutput = null;
+                    if (eventResult.AsyncEnumeratorOutput == null)
                     {
                         eventResult.AsyncEnumeratorOutput = eventResult.StreamingOutputTask.GetAsyncEnumerator();
                         eventResult.AsyncEnumeratorOutputNextTask = eventResult.AsyncEnumeratorOutput.MoveNextAsync();
                         yield return new ProcessStartsMessage(eventResult.Event.Id);
                         continue;
                     }
-                     
+
 
                     if (eventResult.AsyncEnumeratorOutputNextTask.IsCompletedSuccessfully)
                     {
@@ -263,7 +297,7 @@ public class GradioApp
                             continue;
                         }
                         else
-                        { 
+                        {
                             result = eventResult.AsyncEnumeratorOutputData;
                             yield return new ProcessCompletedMessage(eventResult.Event.Id, new Dictionary<string, object> {
                                 { "data",result}
@@ -291,7 +325,7 @@ public class GradioApp
         }
     }
 
-    public List<string>? ClonseSession(string sessionHash)
+    public List<string>? CloseSession(string sessionHash)
     {
         Context.PendingEventIdsSession.TryRemove(sessionHash, out List<string>? tmpIds);
         return tmpIds;
@@ -427,7 +461,7 @@ public class GradioApp
                     try
                     {
                         Input input = gr.Input(blockFunction, data);
-                        Context.EventResults.TryAdd(eventIn.ToString(), new EventResult { Event = eventIn, BlockFunction = blockFunction, Input = input, OutputTask = fn?.Invoke(input), StreamingOutputTask = streamingFn?.Invoke(input)  });
+                        Context.EventResults.TryAdd(eventIn.ToString(), new EventResult { Event = eventIn, BlockFunction = blockFunction, Input = input, OutputTask = fn?.Invoke(input), StreamingOutputTask = streamingFn?.Invoke(input) });
                     }
                     catch (Exception ex)
                     {

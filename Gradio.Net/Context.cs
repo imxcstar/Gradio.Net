@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿using Gradio.Net.Models;
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 
 
@@ -8,20 +9,22 @@ internal static class Context
 {
     internal static object PendingMessageLock = new object();
     internal static ConcurrentDictionary<string, List<string>> PendingEventIdsSession { get; private set; } = new ConcurrentDictionary<string, List<string>>();
-    internal static ConcurrentDictionary<string,string> DownloadableFiles { get; private set; } = new ConcurrentDictionary<string,string>();
-    internal static ConcurrentDictionary<string, EventResult> EventResults { get; private set; } =  new ConcurrentDictionary<string, EventResult>();
+    internal static ConcurrentDictionary<string, string> DownloadableFiles { get; private set; } = new ConcurrentDictionary<string, string>();
+    internal static ConcurrentDictionary<string, EventResult> EventResults { get; private set; } = new ConcurrentDictionary<string, EventResult>();
     internal static Channel<Event> EventChannel { get; private set; } = Channel.CreateUnbounded<Event>();
     internal static Blocks RootBlock { get; private set; } = null;
+
+    internal static readonly Channel<LogMessage> LogMessageChannel = Channel.CreateUnbounded<LogMessage>();
 
     private static Blocks _currentBlocks = null;
     internal static void SetCurrentBlocks(Blocks blocks)
     {
         if (RootBlock == null && blocks != null)
-        { 
+        {
             RootBlock = blocks;
         }
         if (_currentBlocks == null)
-        { 
+        {
             if (blocks != null)
             {
                 _currentBlocks = blocks;
@@ -39,11 +42,11 @@ internal static class Context
                 Form formParent = null;
                 Tabs tabsParent = null;
                 List<Block> children = _currentBlocks.ToList();
-                for (int i = 0; i < children.Count; i++)                   
+                for (int i = 0; i < children.Count; i++)
                 {
                     Block child = children[i];
                     if (child is Tab tab)
-                    {                            
+                    {
                         if (tabsParent == null)
                         {
                             tabsParent = [];
@@ -55,21 +58,21 @@ internal static class Context
 
                         tabsParent.Add(tab);
                         _currentBlocks.Remove(child);
-                       
+
                     }
                     else if (child is FormComponent formComponent)
                     {
-                        if (formComponent.Container)
+                        if (formComponent.GetPropertyValue<bool>(nameof(formComponent.Container)))
                         {
                             if (formParent == null)
                             {
                                 formParent = [];
-                                _currentBlocks.Insert(i,formParent);
+                                _currentBlocks.Insert(i, formParent);
                                 formParent.ParentBlocks = _currentBlocks;
                                 formParent.Render = false;
-                                
+
                             }
-                            
+
                             formParent.Add(formComponent);
                             _currentBlocks.Remove(child);
                         }
@@ -82,7 +85,10 @@ internal static class Context
 
     internal static void AddToCurrentBlocks(Block block)
     {
-        _currentBlocks.Add(block);
+        if (_currentBlocks != null)
+        {
+            _currentBlocks.Add(block);
+        }
     }
 
     private static int _id = 0;
