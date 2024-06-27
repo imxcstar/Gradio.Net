@@ -63,7 +63,7 @@ namespace Gradio.Net
                 yield return sseMessage.ProcessMsg();
             }
             yield return new CloseStreamMessage().ProcessMsg();
-            gradioApp.ClonseSession(sessionHash);
+            gradioApp.CloseSession(sessionHash);
         }
 
         private async IAsyncEnumerable<string> GradioAppUploadProgress()
