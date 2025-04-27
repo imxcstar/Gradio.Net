@@ -79,15 +79,21 @@ namespace Gradio.Net
             switch (uri.AbsolutePath)
             {
                 case "/config":
+                    return gradioApp.GetConfig(rootUrl, false);
                 case "/info":
-                    var ret = gradioApp.GetApiInfo();
-                    return ret;
-                case "/queue/join":
+                    return gradioApp.GetApiInfo();
+                case "/theme.css":
+                    return new CustomReturn()
+                    {
+                        Content = Encoding.UTF8.GetBytes(gradioApp.GetThemeCss()),
+                        ContentType = "text/css"
+                    };
+                case $"{GradioApp.API_PREFIX}/queue/join":
                     {
                         using var contentStream = request.Content.AsStreamForRead();
                         return await gradioApp.QueueJoin(rootUrl, (await JsonSerializer.DeserializeAsync<PredictBodyIn>(contentStream))!);
                     }
-                case "/queue/data":
+                case $"{GradioApp.API_PREFIX}/queue/data":
                     {
                         var querys = HttpUtility.ParseQueryString(uri.Query);
                         var sessionHash = querys["session_hash"]!;
@@ -97,34 +103,39 @@ namespace Gradio.Net
                             ContentType = "text/event-stream"
                         };
                     }
-                //case "/upload":
-                //    {
-                //        var querys = HttpUtility.ParseQueryString(uri.Query);
-                //        var uploadId = querys["upload_id"]!;
-                //        var boundary = GetBoundary(MediaTypeHeaderValue.Parse(request.Headers.First(x => x.Key.Equals("Content-Type", StringComparison.CurrentCultureIgnoreCase)).Value));
-                //        using var stream = request.Content.AsStreamForRead();
-                //        var reader = new MultipartReader(boundary, stream);
-                //        var files = new List<(Stream Stream, string Name)>();
-                //        var section = await reader.ReadNextSectionAsync();
-                //        while (section != null)
-                //        {
-                //            var contentDisposition = section.GetContentDispositionHeader();
-                //            if (contentDisposition != null && contentDisposition.IsFileDisposition() && contentDisposition.FileName.Value != null)
-                //                files.Add((section.Body, contentDisposition.FileName.Value));
-                //            section = await reader.ReadNextSectionAsync();
-                //        }
-                //        return await gradioApp.Upload(uploadId, files);
-                //    }
-                case "/upload_progress":
+                case $"{GradioApp.API_PREFIX}/upload":
+                    {
+                        var querys = HttpUtility.ParseQueryString(uri.Query);
+                        var uploadId = querys["upload_id"]!;
+                        var boundary = GetBoundary(MediaTypeHeaderValue.Parse(request.Headers.First(x => x.Key.Equals("Content-Type", StringComparison.CurrentCultureIgnoreCase)).Value));
+                        using var stream = request.Content.AsStreamForRead();
+                        var reader = new MultipartReader(boundary, stream);
+                        var files = new List<(Stream Stream, string Name)>();
+                        var section = await reader.ReadNextSectionAsync();
+                        while (section != null)
+                        {
+                            var contentDisposition = section.GetContentDispositionHeader();
+                            if (contentDisposition != null && contentDisposition.IsFileDisposition() && contentDisposition.FileName.Value != null)
+                            {
+                                var s = new MemoryStream();
+                                await section.Body.CopyToAsync(s);
+                                s.Position = 0;
+                                files.Add((s, contentDisposition.FileName.Value));
+                            }
+                            section = await reader.ReadNextSectionAsync();
+                        }
+                        return await gradioApp.Upload(uploadId, files);
+                    }
+                case $"{GradioApp.API_PREFIX}/upload_progress":
                     return new SSEStream()
                     {
                         Contents = GradioAppUploadProgress(),
                         ContentType = "text/event-stream"
                     };
                 default:
-                    if (uri.AbsolutePath.StartsWith(FILE_URL))
+                    if (uri.AbsolutePath.StartsWith($"{GradioApp.API_PREFIX}{FILE_URL}"))
                     {
-                        (string filePath, string contentType) = await gradioApp.GetUploadedFile(uri.AbsolutePath.Substring(FILE_URL.Length));
+                        (string filePath, string contentType) = await gradioApp.GetUploadedFile(uri.AbsolutePath.Substring($"{GradioApp.API_PREFIX}{FILE_URL}".Length));
                         return new ApiReturnFile()
                         {
                             File = new PhysicalFileInfo(new FileInfo(filePath)),
@@ -151,6 +162,12 @@ namespace Gradio.Net
         private class ApiReturnFile
         {
             public IFileInfo File { get; set; }
+            public string ContentType { get; set; }
+        }
+
+        private class CustomReturn
+        {
+            public byte[] Content { get; set; }
             public string ContentType { get; set; }
         }
 
@@ -231,6 +248,12 @@ namespace Gradio.Net
                     {
                         using var fileStream = apiFile.File.CreateReadStream();
                         args.Response = await CreateWebResourceResponse(webview2, apiFile.ContentType, fileStream, args, subPath);
+                    }
+                    else if (ret is CustomReturn customReturn)
+                    {
+                        var retStream = new MemoryStream(customReturn.Content);
+                        IRandomAccessStream stream = await ReadStreamRange(retStream, 0, retStream.Length);
+                        args.Response = webview2.Environment.CreateWebResourceResponse(stream, 200, "OK", $"Content-Type: {customReturn.ContentType}");
                     }
                     else if (ret is SSEStream apiSSEStream)
                     {

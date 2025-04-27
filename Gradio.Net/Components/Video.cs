@@ -72,7 +72,7 @@ public class Video : Component, IStreamingInput, IHaveChangeEvent, IHaveClearEve
             return new VideoData { Video = new FileData { Path = null, Url = str } };
         }
 
-        return new VideoData { Video = new FileData { Path = str, Url = $"{rootUrl}{GradioApp.API_PREFIX}/file={str}" } };
+        return new VideoData { Video = new FileData { Path = fileId, Url = $"{rootUrl}{GradioApp.API_PREFIX}/file={fileId}" } };
     }
 
     public static string Payload(object obj)

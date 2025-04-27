@@ -8,178 +8,239 @@
     (function () {
         'use strict';
 
-        (function () {
-            if (!window.onSSEEventStream) {
-                const eventRegisters = {};
+        // 全局事件缓冲池
+        const eventRegisters = window.__eventRegisters__ || (window.__eventRegisters__ = {});
 
-                const onSSEEventStream = (data) => {
-                    let { uuid, final, content } = data;
-                    if (!eventRegisters[uuid]) {
-                        eventRegisters[uuid] = {
-                            instance: null,
-                            pending: [],
-                        };
-                    }
-                    if (final) {
-                        content = null;
-                    } else {
-                        if (typeof content === 'string') {
-                            content = new TextEncoder().encode(content);
-                        }
-                    }
-                    eventRegisters[uuid].pending.push({ final, content });
-                    if (eventRegisters[uuid].instance) {
-                        eventRegisters[uuid].instance.notifyMessage();
-                    }
-                };
-
-                Object.defineProperty(window, 'onSSEEventStream', {
-                    value: onSSEEventStream,
-                    configurable: true,
-                    writable: true,
-                    enumerable: false,
-                });
-
-                class CustomEventSource {
-                    constructor(url) {
-                        this.url = url;
-                        this.listeners = {};
-                        this.eventQueue = [];
-                        this.init();
-                    }
-
-                    async init() {
-                        let data = await fetch(this.url);
-                        let headers = data.headers;
-                        let uuid = headers.get('kapp-event-stream');
-                        this.processEventQueue(uuid);
-                    }
-
-                    addEventListener(type, listener) {
-                        console.log("addEventListener", type);
-                        if (!this.listeners[type]) {
-                            this.listeners[type] = [];
-                        }
-                        this.listeners[type].push(listener);
-                    }
-
-                    dispatchEvent(event) {
-                        if (this.listeners[event.type]) {
-                            this.listeners[event.type].forEach(listener => listener(event));
-                        }
-                    }
-
-                    processEventQueue(uuid) {
-                        const eventObj = eventRegisters[uuid];
-                        if (eventObj != null && eventObj.pending != null && eventObj.pending.length > 0) {
-                            const { final, content } = eventObj.pending.shift();
-                            const dcontent = content ? new TextDecoder().decode(content).substring(6) : null;
-                            console.log("dcontent", uuid, dcontent);
-                            const event = new MessageEvent('message', {
-                                data: dcontent
-                            });
-                            if (this._onmessage && dcontent != null)
-                                this._onmessage(event);
-                            this.dispatchEvent(event);
-
-                            if (final) {
-                                delete eventRegisters[uuid];
-                                return;
-                            }
-                        }
-                        setTimeout(() => this.processEventQueue(uuid), 30);
-                    }
-
-                    set onmessage(callback) {
-                        this._onmessage = callback;
-                    }
-
-                    close() {
-                    }
-                }
-
-                window.EventSource = CustomEventSource;
+        // 统一 SSE 事件推送接口
+        function onSSEEventStream(data) {
+            let { uuid, final, content } = data;
+            if (!eventRegisters[uuid]) {
+                eventRegisters[uuid] = { pending: [], finished: false };
             }
+            if (!final && typeof content === 'string') {
+                content = new TextEncoder().encode(content);
+            } else if (final) {
+                content = null;
+            }
+            eventRegisters[uuid].pending.push({ final, content });
+        }
 
-            const originalFetch = window.fetch;
+        // 兼容 window.onSSEEventStream
+        Object.defineProperty(window, 'onSSEEventStream', {
+            value: onSSEEventStream,
+            configurable: true,
+            writable: true,
+            enumerable: false,
+        });
 
-            // 重写fetch函数
-            window.fetch = async (input, init) => {
-                // 获取请求的URL
-                const url = typeof input === 'string' ? input : input.url;
+        // fetch 拦截器，自动将 sse 响应转成自定义流
+        (function (origFetch) {
+            window.fetch = async function (...args) {
+                let r = await origFetch.apply(this, args);
+                let eventStreamId = r.headers.get('kapp-event-stream');
+                if (eventStreamId) {
+                    // 初始化缓冲
+                    if (!eventRegisters[eventStreamId]) {
+                        eventRegisters[eventStreamId] = { pending: [], finished: false };
+                    }
+                    // 替换 body 为自定义 ReadableStream
+                    const stream = createKAppEventReadableStream(eventStreamId);
+                    Object.defineProperty(r, 'body', {
+                        configurable: true,
+                        enumerable: true,
+                        get() { return stream; }
+                    });
+                }
+                return r;
+            };
+        })(window.fetch);
 
-                // 检查URL是否调用了/upload接口
-                if (url.includes('/upload') && init && init.body instanceof FormData) {
-                    // 从URL中获取upload_id参数
-                    const urlParams = new URLSearchParams(url.split('?')[1]);
-                    const uploadId = urlParams.get('upload_id');
+        // 自定义 ReadableStream，消费 eventRegisters 缓冲
+        function createKAppEventReadableStream(eventStreamId) {
+            return new ReadableStream({
+                async pull(controller) {
+                    // 等待数据到达
+                    while (
+                        !eventRegisters[eventStreamId] ||
+                        !eventRegisters[eventStreamId].pending ||
+                        eventRegisters[eventStreamId].pending.length === 0
+                    ) {
+                        // 若已结束则关闭
+                        if (eventRegisters[eventStreamId] && eventRegisters[eventStreamId].finished) {
+                            controller.close();
+                            return;
+                        }
+                        await new Promise(r => setTimeout(r, 50));
+                    }
+                    // 取数据
+                    const data = eventRegisters[eventStreamId].pending.shift();
+                    if (data.final) {
+                        eventRegisters[eventStreamId].finished = true;
+                        controller.close();
+                    } else {
+                        controller.enqueue(data.content);
+                    }
+                },
+                cancel() {
+                    if (eventRegisters[eventStreamId]) {
+                        eventRegisters[eventStreamId].finished = true;
+                    }
+                }
+            });
+        }
 
-                    // 获取上传的文件
-                    const formData = init.body;
-                    let file = null;
+        // EventSource 兼容
+        if (!window.__KAppCustomEventSource) {
+            class CustomEventSource {
+                constructor(url) {
+                    this.url = url;
+                    this.listeners = {};
+                    this.eventQueue = [];
+                    this.closed = false;
+                    this.init();
+                }
 
-                    // 遍历FormData找到第一个文件对象
-                    for (let entry of formData.entries()) {
-                        if (entry[1] instanceof File) {
-                            file = entry[1];
-                            break;
+                async init() {
+                    let data = await fetch(this.url);
+                    let uuid = data.headers.get('kapp-event-stream');
+                    this.uuid = uuid;
+                    this.processEventQueue();
+                }
+
+                addEventListener(type, listener) {
+                    if (!this.listeners[type]) this.listeners[type] = [];
+                    this.listeners[type].push(listener);
+                }
+
+                dispatchEvent(event) {
+                    if (this.listeners[event.type]) {
+                        this.listeners[event.type].forEach(listener => listener(event));
+                    }
+                }
+
+                processEventQueue() {
+                    if (this.closed) return;
+                    const uuid = this.uuid;
+                    if (eventRegisters[uuid] && eventRegisters[uuid].pending && eventRegisters[uuid].pending.length > 0) {
+                        const { final, content } = eventRegisters[uuid].pending.shift();
+                        const dcontent = content ? new TextDecoder().decode(content) : null;
+                        const event = new MessageEvent('message', { data: dcontent });
+                        if (this._onmessage && dcontent != null) this._onmessage(event);
+                        this.dispatchEvent(event);
+                        if (final) {
+                            eventRegisters[uuid].finished = true;
+                            this.closed = true;
+                            return;
                         }
                     }
-
-                    if (file) {
-                        // 将文件转换为Uint8Array
-                        const arrayBuffer = await file.arrayBuffer();
-                        const uint8Array = new Uint8Array(arrayBuffer);
-                        const ret = await window.GradioDotNetReference.invokeMethodAsync(window.GradioUploadFile, uploadId, file.name, uint8Array);
-                        console.log("GradioDotNetReference", ret);
-                        // 调用自定义的上传函数
-                        return new Promise((resolve, reject) => {
-                            resolve(new Response(ret, {
-                                status: 200,
-                                headers: { 'Content-Type': 'application/json' }
-                            }));
-                        });
-                    } else {
-                        console.error('No file found in FormData');
-                        return Promise.reject(new Error('No file found in FormData'));
-                    }
-                } else {
-                    // 对于其他接口，照常处理
-                    return originalFetch(input, init);
+                    setTimeout(() => this.processEventQueue(), 30);
                 }
-            };
-        })();
+
+                set onmessage(callback) { this._onmessage = callback; }
+                get onmessage() { return this._onmessage; }
+                close() { this.closed = true; }
+            }
+            window.EventSource = CustomEventSource;
+            window.__KAppCustomEventSource = true;
+        }
+
+        // 监听所有 input[type="file"] 的相关事件
+        window.allFileInputs = [];
+        window.fileInputCount = 0;
+
+        function interceptFileInputs(root = document) {
+            root.querySelectorAll('input[type="file"]').forEach(function (input) {
+                input.addEventListener('click', block, true);
+                input.addEventListener('focus', block, true);
+                input.addEventListener('mousedown', block, true);
+            });
+        }
+        async function block(e) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            window.fileInputCount++;
+            let s = window.fileInputCount.toString();
+            window.allFileInputs[s] = e;
+            const ret = await window.GradioDotNetReference.invokeMethodAsync(window.GradioSelectFile, s);
+        }
+
+        // 初始拦截
+        interceptFileInputs();
+
+        // 监听后续动态添加的 input[type="file"]
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(m => {
+                m.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) {
+                        if (node.matches && node.matches('input[type="file"]')) {
+                            interceptFileInputs(node.parentNode || document);
+                        } else if (node.querySelectorAll) {
+                            interceptFileInputs(node);
+                        }
+                    }
+                });
+            });
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+
+        // 拦截 showOpenFilePicker
+        if (window.showOpenFilePicker) {
+            window.showOpenFilePicker = async function () {
+                alert('showOpenFilePicker选择文件功能已被禁用！');
+                //await window.GradioDotNetReference.invokeMethodAsync(window.GradioSelectFile, 'test');
+                return Promise.reject(new Error('已禁用'));
+            }
+        }
+
     })();
 </script>
 
 @html
 
 @code {
-    public MarkupString html;
+	public MarkupString html;
 
-    protected override void OnInitialized()
-    {
-        Uri uri = new(_navigation.Uri);
-        var indexInfo = _gradioApp.GetFileInfo("index.html");
-        using Stream fileStream = indexInfo.CreateReadStream();
-        Template template = new(new StreamReader(fileStream).ReadToEnd());
-        html = new MarkupString(template.Render(new Dictionary<string, object>() { { "config", _gradioApp.GetConfig($"{uri.Scheme}://{uri.Host}") } }));
-    }
+	protected override void OnInitialized()
+	{
+		Uri uri = new(_navigation.Uri);
+		var indexInfo = _gradioApp.GetFileInfo("index.html");
+		using Stream fileStream = indexInfo.CreateReadStream();
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender)
-        {
-            await _js.InvokeVoidAsync("RegisterGradioDotNetReference", DotNetObjectReference.Create(this));
-            await _js.InvokeVoidAsync("RegisterGradioUploadFileData", nameof(UploadFileData));
-        }
-        await base.OnAfterRenderAsync(firstRender);
-    }
+		Template template = new(new StreamReader(fileStream).ReadToEnd());
+		html = new MarkupString(template.Render(new Dictionary<string, object>() { { "config", _gradioApp.GetConfig($"{uri.Scheme}://{uri.Host}") }, { "gradio_api_info", new { named_endpoints = new Dictionary<string, object>(), unnamed_endpoints = new Dictionary<string, object>() } } }));
+	}
 
-    [JSInvokable]
-    public async Task<string> UploadFileData(string uploadId, string fileName, byte[] fileContent)
-    {
-        var ret = await _gradioApp.Upload(uploadId, [(new MemoryStream(fileContent), fileName)]);
-        return System.Text.Json.JsonSerializer.Serialize(ret);
-    }
+	protected override async Task OnAfterRenderAsync(bool firstRender)
+	{
+		if (firstRender)
+		{
+			await _js.InvokeVoidAsync("RegisterGradioDotNetReference", DotNetObjectReference.Create(this));
+			await _js.InvokeVoidAsync("RegisterGradioSelectFile", nameof(SelectFile));
+			await _js.InvokeVoidAsync("RegisterGradioUploadFileData", nameof(UploadFileData));
+		}
+		await base.OnAfterRenderAsync(firstRender);
+	}
+
+	[JSInvokable]
+	public async Task SelectFile(string elementId)
+	{
+		var fileResult = await FilePicker.Default.PickAsync();
+		if (fileResult != null)
+		{
+			using var stream = await fileResult.OpenReadAsync();
+			using var ms = new MemoryStream();
+			await stream.CopyToAsync(ms);
+			var bytes = ms.ToArray();
+			var base64 = Convert.ToBase64String(bytes);
+
+			await _js.InvokeVoidAsync("GradioSetSelectFile", elementId, fileResult.FileName, base64);
+		}
+	}
+
+	[JSInvokable]
+	public async Task<string> UploadFileData(string uploadId, string fileName, byte[] fileContent)
+	{
+		var ret = await _gradioApp.Upload(uploadId, [(new MemoryStream(fileContent), fileName)]);
+		return System.Text.Json.JsonSerializer.Serialize(ret);
+	}
 }

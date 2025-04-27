@@ -17,12 +17,7 @@ namespace Demo.Blazor.Hybrid.Maui
                 });
 
             builder.Services.AddMauiBlazorWebView();
-            builder.Services.AddGradio(CreateBlocks().Result, config => {
-                config.Stylesheets = new string[] {
-                    "https://fonts.font.im/css2?family=Source+Sans+Pro:wght@400;600&display=swap",
-                    "https://fonts.font.im/css2?family=IBM+Plex+Mono:wght@400;600&display=swap"
-                };
-            });
+            builder.Services.AddGradio(CreateBlocks().Result);
 
 #if DEBUG
             builder.Services.AddBlazorWebViewDeveloperTools();

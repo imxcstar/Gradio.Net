@@ -12,8 +12,31 @@
         function RegisterGradioDotNetReference(dotNetReference) {
             window.GradioDotNetReference = dotNetReference;
         }
+        function RegisterGradioSelectFile(methodName) {
+            window.GradioSelectFile = methodName;
+        }
         function RegisterGradioUploadFileData(methodName) {
             window.GradioUploadFile = methodName;
+        }
+        function GradioSetSelectFile(elementId, fileName, base64Content) {
+            var select = window.allFileInputs[elementId];
+            if (!select) return;
+            var input = select.target;
+            // 创建一个File对象并填充input
+            var byteString = atob(base64Content);
+            var ab = new ArrayBuffer(byteString.length);
+            var ia = new Uint8Array(ab);
+            for (var i = 0; i < byteString.length; i++) {
+                ia[i] = byteString.charCodeAt(i);
+            }
+            var blob = new Blob([ab]);
+            var file = new File([blob], fileName);
+            // 创建DataTransfer模拟文件选择
+            var dt = new DataTransfer();
+            dt.items.add(file);
+            input.files = dt.files;
+            // 触发change事件
+            input.dispatchEvent(new Event('change', { bubbles: true }));
         }
     </script>
 </head>

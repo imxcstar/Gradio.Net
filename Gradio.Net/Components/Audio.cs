@@ -64,7 +64,7 @@ public class Audio : Component, IStreamingInput, IHaveChangeEvent, IHaveClearEve
             return new FileData { Path = null, Url = str };
         }
 
-        return new FileData { Path = str, Url = $"{rootUrl}{GradioApp.API_PREFIX}/file={str}" };
+        return new FileData { Path = fileId, Url = $"{rootUrl}{GradioApp.API_PREFIX}/file={fileId}" };
     }
 
     public static string Payload(object obj)
